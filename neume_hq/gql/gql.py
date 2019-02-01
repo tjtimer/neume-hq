@@ -4,14 +4,15 @@ author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
 import asyncio
+import types
 from pprint import pprint
 from typing import Optional
 
 from aio_arango.db import ArangoDB, DocumentType
-from graphene import Mutation, ObjectType, Schema, Field, List
+from graphene import Mutation, ObjectType, Schema, Field, List, Dynamic
 
-from neume_hq.gql.fields import ID
-from neume_hq.utilities import snake_case
+from neume_hq.gql.fields import ID, GQList
+from neume_hq.utilities import snake_case, ifl
 
 
 def find_(cls):
@@ -37,6 +38,7 @@ def all_(cls):
 
     return inner
 
+registry = {}
 
 class GQLSchema:
     def __init__(self,
@@ -44,16 +46,15 @@ class GQLSchema:
                  queries: Optional[tuple] = None,
                  mutations: Optional[tuple] = None,
                  subscriptions: Optional[tuple] = None):
-
+        self._has_relations = []
         self._schema = None
         self._db = None
+        self._nodes = {}
+        self._edges = {}
         self._graphs = {}
         self._queries = {}
         self._mutations = {}
         self._subscriptions = {}
-
-        self._nodes = {}
-        self._edges = {}
 
         if isinstance(graphs, (list, tuple)):
             self.register_graphs(*graphs)
@@ -88,24 +89,42 @@ class GQLSchema:
             for graph in self._graphs.values()
         ))
         self._db = db
+        # trans = {}
+        # for name in self._has_relations:
+        #     node = self._nodes.pop(name, None)
+        #     props = {k: v for k, v in node.__dict__.items() if k != '_meta'}
+        #     for k, v in node._config_['related']:
+        #         if not v.class_name in trans.keys():
+        #             if v.class_name == node.__name__:
+        #                 nd = node
+        #             else:
+        #                 nd = self._nodes[ifl.plural(snake_case(v.class_name))]
+        #             trans[v.class_name] = await v(nd)
+        #         props[k] = trans[v.class_name]
+        #
+        #     self._nodes[name] = type(node.__name__, (ObjectType,), {**props})
+
+        queries = [
+            type(
+                f'{node.__name__}Query',
+                (ObjectType,),
+                {
+                    snake_case(node.__name__): Field(
+                        node, _id=ID(), resolver=find_(node)
+                    ),
+                    node._collname_: List(node, resolver=all_(node))
+                }
+            ) for node in  self._nodes.values()
+        ]
         pprint(
-            list(
-                self._queries.values()
-            )[0].__dict__
+            queries
         )
         pprint(
-            list(
-                self._queries.values()
-            )[0].__dict__['group'].__dict__
-        )
-        pprint(
-            list(
-                self._queries.values()
-            )[0].__dict__['group'].__dict__['_type'].__dict__
+            queries[0].__dict__
         )
         query_master = type(
             'QueryMaster',
-            (*self._queries.values(), ObjectType),
+            (*queries, ObjectType),
             {}
         )
         # mutation_master = type(
@@ -130,23 +149,19 @@ class GQLSchema:
         self.register_edges(*graph.edges)
 
     def register_node(self, node):
-        print(node)
         if node._collname_ not in self._nodes.keys():
-            self._nodes[node._collname_] = node
-            self.register_query(
-                type(
-                    f'{node.__name__}Query',
-                    (ObjectType,),
-                    {snake_case(node.__name__): Field(node, _id=ID(), resolver=find_(node)),
-                     node._collname_: List(node, resolver=all_(node))})
-            )
+            registry[node.__name__] = self._nodes[node._collname_] = node
+
+            if hasattr(node, '_config_'):
+                if 'related' in node._config_.keys():
+                    self._has_relations.append(node._collname_)
 
     def register_edge(self, edge):
         if edge._collname_ not in self._edges.keys():
             self._edges[edge._collname_] = edge
 
     def register_query(self, query):
-        self._queries[snake_case(query.__name__)] = query
+        self._queries[snake_case(query.__name__)] = Field(query, resolver=find_(query))
 
     def register_mutation(self, mutation):
         name = mutation.__name__

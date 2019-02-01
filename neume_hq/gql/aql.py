@@ -78,7 +78,7 @@ class Query:
         return self
 
 
-class QueryGraph(Query):
+class GraphQuery(Query):
 
     def __init__(self,
                  graph_name: str, *,

@@ -5,7 +5,8 @@ created: 29.01.2019
 """
 from graphene import String
 
-from neume_hq.gql.fields import Email, Password, Date
+from neume_hq.gql.aql import GraphQuery
+from neume_hq.gql.fields import Email, Password, Date, GQList
 from neume_hq.gql.models import Node, Index
 
 
@@ -29,6 +30,7 @@ class Group(Node):
 class Department(Node):
     title = String()
     description = String()
+    infos = GQList('Info', query=GraphQuery('personGraph', direction='INBOUND'))
 
     class Config:
         indexes = (Index('title'),)
@@ -37,6 +39,7 @@ class Department(Node):
 class Info(Node):
     title = String()
     body = String()
+    infos = GQList('Info', query=GraphQuery('personGraph', direction='INBOUND'))
 
     class Config:
         indexes = (Index('title'),)

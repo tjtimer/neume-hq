@@ -85,7 +85,6 @@ class Node(BaseModel):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         cls._collname_ = ifl.plural(snake_case(cls.__name__))
-        pprint(cls.__dict__)
 
 class Edge(BaseModel):
 

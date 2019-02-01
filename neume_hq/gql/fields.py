@@ -6,7 +6,8 @@ created: 29.01.2019
 from uuid import UUID
 
 import arrow
-from graphene import Scalar
+from graphene import Scalar, Int, String, List, ObjectType, Dynamic, Field
+from graphene.types.structures import Structure
 from graphql.execution.tests.test_lists import ast
 
 
@@ -143,4 +144,59 @@ class Password(Scalar):
         print('Password parsing literal: ', ast)
         if isinstance(ast, ast.StringValue):
             return ast.value
+
+
+class GQField(Dynamic):
+
+    def __init__(self, class_name: str, query=None, resolver=None):
+        self.class_name = class_name
+        self._cls = None
+        self.query = query
+        if resolver is None:
+            resolver = self.__resolve
+        self.__resolver = resolver
+        def get_dynamic():
+            from .gql import registry
+            self._cls = registry[self.class_name]
+            return Field(self._cls,
+                        first=Int(), skip=Int(), search=String(),
+                        resolver=self.__resolver)
+        super().__init__(get_dynamic)
+
+    async def __resolve(self,
+                        inst, info,
+                        first: Int = None, skip: Int = None,
+                        search: String = None):
+        self.query.start_vertex, db = inst._id, info.context['db']
+        result = [obj
+                  async for obj in db.query(self.query.statement)
+                  if obj is not None][0]
+        return self._cls(**result)
+
+
+class GQList(Dynamic):
+
+    def __init__(self, class_name: str, query=None, resolver=None):
+        self.class_name = class_name
+        self._cls = None
+        self.query = query
+        if resolver is None:
+            resolver = self.__resolve
+        self.__resolver = resolver
+        def get_dynamic():
+            from .gql import registry
+            self._cls = registry[self.class_name]
+            return List(self._cls,
+                        first=Int(), skip=Int(), search=String(),
+                        resolver=self.__resolver)
+        super().__init__(get_dynamic)
+
+    async def __resolve(self,
+                        inst, info,
+                        first: Int = None, skip: Int = None,
+                        search: String = None):
+        self.query.start_vertex, db = inst._id, info.context['db']
+        return [self._cls(**obj)
+                async for obj in db.query(self.query.statement)
+                if obj is not None]
 

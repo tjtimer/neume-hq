@@ -58,6 +58,3 @@ class Config:
                     **{k.upper(): v
                        for k, v in yaml.safe_load(conf.read()).items()}
                 )
-        print(f'{" loaded config ":*^80}')
-        pprint(self.__dict__)
-        pprint(self.__cfg)

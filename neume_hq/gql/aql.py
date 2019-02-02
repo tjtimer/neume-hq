@@ -160,8 +160,7 @@ class Graph:
 
     @property
     def nodes(self):
-        print(self._nodes)
-        return list(self._nodes)
+        return self._nodes
 
     @property
     def edges(self):

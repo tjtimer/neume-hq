@@ -6,7 +6,7 @@ created: 31.01.19
 from graphene import String
 
 from neume_hq.gql.models import Edge, Index
-from neume_hq.pub_api.nodes import Person, Department, Group, Info, Media, Message
+from neume_hq.pub_api.nodes import Department, Group, Info, Media, Message, Person
 
 
 class BelongsTo(Edge):

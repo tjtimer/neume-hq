@@ -3,12 +3,10 @@ app.py
 author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
-from pprint import pprint
 from uuid import UUID
 
 import arrow
-from graphene import Scalar, Int, String, List, ObjectType, Dynamic, Field
-from graphene.types.structures import Structure
+from graphene import Dynamic, Field, Int, List, ObjectType, Scalar, String
 from graphql.execution.tests.test_lists import ast
 
 
@@ -112,7 +110,6 @@ class Email(String):
 
     @staticmethod
     def coerce_string(value):
-        print('Email coercing value: ', value)
         return value
 
     serialize = coerce_string
@@ -128,7 +125,6 @@ class Password(Scalar):
 
     @staticmethod
     def coerce_string(value):
-        print('Password coercing value: ', value)
         return value
 
     serialize = coerce_string
@@ -136,7 +132,6 @@ class Password(Scalar):
 
     @staticmethod
     def parse_literal(ast):
-        print('Password parsing literal: ', ast)
         if isinstance(ast, ast.StringValue):
             return ast.value
 
@@ -152,7 +147,6 @@ class GQField(Dynamic):
         self.__resolver = resolver
         self._include = include
         def get_dynamic():
-            print('getting dynamic field type')
             from .gql import registry
             if self._include is None:
                 self._cls = registry[self.class_name]
@@ -174,7 +168,6 @@ class GQField(Dynamic):
         db = info.context['db']
         self.query.start_vertex = inst._id
         result = await db.fetch_one(self.query.statement)
-        pprint(result)
         return self._cls(**result[0]) if len(result) else None
 
 
@@ -188,7 +181,6 @@ class GQList(Dynamic):
             resolver = self.__resolve
         self.__resolver = resolver
         def get_dynamic():
-            print('getting dynamic list type')
             from .gql import registry
             self._cls = registry[self.class_name]
             return List(self._cls,

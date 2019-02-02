@@ -4,18 +4,17 @@ author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
 import asyncio
-import types
+import ujson as json
 from pprint import pprint
 from typing import Optional
-import ujson as json
 
 import arrow
 from aio_arango.db import ArangoDB, DocumentType
-from graphene import Mutation, ObjectType, Schema, Field, List, Dynamic, Scalar, String
+from graphene import Field, List, Mutation, ObjectType, Scalar, Schema, String
 
-from neume_hq.gql.fields import ID, GQList
+from neume_hq.gql.fields import ID
 from neume_hq.gql.models import Node
-from neume_hq.utilities import snake_case, ifl
+from neume_hq.utilities import snake_case
 
 
 def create(node, graph_name):
@@ -56,7 +55,6 @@ def update(node, graph_name):
              f'  LIMIT 1'
              f'  UPDATE doc WITH {json.dumps(data)} IN {node._collname_}'
              f'  RETURN NEW')
-        print(q)
         data.update(**(await info.context['db'].fetch_one(q))[0])
         return node(**data)
 
@@ -77,8 +75,7 @@ def find_(cls):
 
 
 def all_(cls):
-    async def inner(_, info, first=None, skip=None, **kwargs):
-        pprint(info.context['request'])
+    async def inner(_, info, first=None, skip=None):
         _q = f'FOR x in {cls._collname_}'
         if first:
             limit = f'LIMIT {first}'
@@ -247,7 +244,6 @@ class GQLSchema:
             if isinstance(node, list):
                 nodes.extend(node)
             else:
-                print('registering mutations for', node)
                 self.register_mutation(node, graph.name)
 
     def register_subscriptions(self, *subscriptions):

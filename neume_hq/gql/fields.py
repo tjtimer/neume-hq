@@ -3,6 +3,7 @@ app.py
 author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
+from pprint import pprint
 from uuid import UUID
 
 import arrow
@@ -142,16 +143,25 @@ class Password(Scalar):
 
 class GQField(Dynamic):
 
-    def __init__(self, class_name: str, query=None, resolver=None):
+    def __init__(self, class_name: str, query=None, resolver=None, include=None):
         self.class_name = class_name
         self._cls = None
         self.query = query
         if resolver is None:
             resolver = self.__resolve
         self.__resolver = resolver
+        self._include = include
         def get_dynamic():
+            print('getting dynamic field type')
             from .gql import registry
-            self._cls = registry[self.class_name]
+            if self._include is None:
+                self._cls = registry[self.class_name]
+            else:
+                self._cls = type(
+                    include[0],
+                    (registry[self.class_name], ObjectType),
+                    {**include[1]}
+                )
             return Field(self._cls,
                         first=Int(), skip=Int(), search=String(),
                         resolver=self.__resolver)
@@ -161,9 +171,11 @@ class GQField(Dynamic):
                         inst, info,
                         first: Int = None, skip: Int = None,
                         search: String = None):
-        self.query.start_vertex, db = inst._id, info.context['db']
+        db = info.context['db']
+        self.query.start_vertex = inst._id
         result = await db.fetch_one(self.query.statement)
-        return self._cls(**result[0]) if len(result) else 'none'
+        pprint(result)
+        return self._cls(**result[0]) if len(result) else None
 
 
 class GQList(Dynamic):
@@ -176,6 +188,7 @@ class GQList(Dynamic):
             resolver = self.__resolve
         self.__resolver = resolver
         def get_dynamic():
+            print('getting dynamic list type')
             from .gql import registry
             self._cls = registry[self.class_name]
             return List(self._cls,

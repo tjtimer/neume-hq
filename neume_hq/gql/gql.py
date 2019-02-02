@@ -78,6 +78,7 @@ def find_(cls):
 
 def all_(cls):
     async def inner(_, info, first=None, skip=None, **kwargs):
+        pprint(info.context['request'])
         _q = f'FOR x in {cls._collname_}'
         if first:
             limit = f'LIMIT {first}'

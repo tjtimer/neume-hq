@@ -19,8 +19,10 @@ class Person(Node):
         'Department',
         query=GraphQuery(
             'personGraph',
-            direction='OUTBOUND'
-        ).f('v._id').like('departments%')
+            direction='OUTBOUND',
+            ret = 'MERGE(v, { "status": e.status })'
+        ).f('v._id').like('departments%'),
+        include=('employer', {'status': String()})
     )
 
     class Config:

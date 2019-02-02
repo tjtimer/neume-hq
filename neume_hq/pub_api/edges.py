@@ -23,20 +23,6 @@ class WorksAt(Edge):
         _from = (Person,)
         _to = (Department,)
         indexes = (Index('_from', '_to'), Index('status', unique=False))
-    #
-    # @classmethod
-    # async def update(cls, _, info, **kwargs):
-    #     _from = kwargs.pop('_from', None)
-    #     _to = kwargs.pop('_to', None)
-    #     q = (f'FOR e IN works_at'
-    #          f'  FILTER e._from == \"{_from}\"'
-    #          f'  AND e._to == \"{_to}\"'
-    #          f'  LIMIT 1'
-    #          f'  UPDATE e WITH {json.dumps(kwargs)} IN works_at'
-    #          f'  RETURN NEW')
-    #     print(q)
-    #     node = cls(**(await info.context['db'].fetch_one(q))[0])
-    #     return node
 
 class Sent(Edge):
     class Config:

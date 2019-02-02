@@ -8,12 +8,43 @@ import types
 from pprint import pprint
 from typing import Optional
 
+import arrow
 from aio_arango.db import ArangoDB, DocumentType
-from graphene import Mutation, ObjectType, Schema, Field, List, Dynamic
+from graphene import Mutation, ObjectType, Schema, Field, List, Dynamic, Scalar, String
 
 from neume_hq.gql.fields import ID, GQList
 from neume_hq.utilities import snake_case, ifl
 
+
+def create(node, graph_name):
+    async def _create(_, info, **kwargs):
+        data = {**kwargs, '_created': arrow.utcnow().timestamp}
+        obj = node(**data)
+        obj.__dict__.update(
+            **(await info.context['db'][graph_name].vertex_create(
+            node._collname_, data))
+        )
+        return obj
+
+    return _create
+
+
+def update(node, graph_name):
+    async def _update(_, info, **kwargs):
+        _id = kwargs.pop('_id', None)
+        data = {**kwargs, '_updated': arrow.utcnow().timestamp}
+        obj = node(_id=_id, **data)
+        obj.__dict__.update(
+            **(await info.context['db'][graph_name].vertex_update(
+            _id, data)))
+        return obj
+
+    return _update
+
+mutators = {
+    'create': create,
+    'update': update
+}
 
 def find_(cls):
     async def inner(_, info, **kwargs):
@@ -89,21 +120,6 @@ class GQLSchema:
             for graph in self._graphs.values()
         ))
         self._db = db
-        # trans = {}
-        # for name in self._has_relations:
-        #     node = self._nodes.pop(name, None)
-        #     props = {k: v for k, v in node.__dict__.items() if k != '_meta'}
-        #     for k, v in node._config_['related']:
-        #         if not v.class_name in trans.keys():
-        #             if v.class_name == node.__name__:
-        #                 nd = node
-        #             else:
-        #                 nd = self._nodes[ifl.plural(snake_case(v.class_name))]
-        #             trans[v.class_name] = await v(nd)
-        #         props[k] = trans[v.class_name]
-        #
-        #     self._nodes[name] = type(node.__name__, (ObjectType,), {**props})
-
         queries = [
             type(
                 f'{node.__name__}Query',
@@ -116,22 +132,16 @@ class GQLSchema:
                 }
             ) for node in  self._nodes.values()
         ]
-        pprint(
-            queries
-        )
-        pprint(
-            queries[0].__dict__
-        )
         query_master = type(
             'QueryMaster',
             (*queries, ObjectType),
             {}
         )
-        # mutation_master = type(
-        #     'MutationMaster',
-        #     (ObjectType,),
-        #     {k: v.Field() for k, v in self._mutations.items()}
-        # )
+        mutation_master = type(
+            'MutationMaster',
+            (ObjectType,),
+            {k: v.Field() for k, v in self._mutations.items()}
+        )
         subscription_master = type(
             'SubscriptionMaster',
             (*self._subscriptions.values(), ObjectType),
@@ -139,7 +149,8 @@ class GQLSchema:
         )
         # noinspection PyTypeChecker
         self._schema = Schema(
-            query=query_master
+            query=query_master,
+            mutation=mutation_master
         )
         return self._schema
 
@@ -147,36 +158,38 @@ class GQLSchema:
         self._graphs[graph.name] = graph
         self.register_nodes(*graph.nodes)
         self.register_edges(*graph.edges)
+        self.register_mutations(graph)
 
     def register_node(self, node):
-        if node._collname_ not in self._nodes.keys():
-            registry[node.__name__] = self._nodes[node._collname_] = node
-
-            if hasattr(node, '_config_'):
-                if 'related' in node._config_.keys():
-                    self._has_relations.append(node._collname_)
+        registry[node.__name__] = self._nodes[node._collname_] = node
 
     def register_edge(self, edge):
         if edge._collname_ not in self._edges.keys():
             self._edges[edge._collname_] = edge
 
     def register_query(self, query):
-        self._queries[snake_case(query.__name__)] = Field(query, resolver=find_(query))
+        self._queries[snake_case(query.__name__)] = query
 
-    def register_mutation(self, mutation):
-        name = mutation.__name__
-        class_name = ''.join([p.title() for p in name.split('_')])
-        output = mutation.__annotations__.pop('return')
-        args = {k: v() for k, v in mutation.__annotations__.items()}
-        mutation_class = type(
-            class_name,
-            (Mutation,),
-            {
-                'Arguments': type('Arguments', (), args),
-                'Output': output,
-                'mutate': mutation
-            })
-        self._mutations[name] = mutation_class
+    def register_mutation(self, node, graph_name):
+        allowed_args = ['_from', '_to']
+        args = {k: v
+                for k, v in node.__dict__.items()
+                if isinstance(v, Scalar)
+                and (k in allowed_args or not k.startswith('_'))}
+        for name, func in mutators.items():
+            if name == 'update':
+                args['_id'] = String(required=True)
+            mutation_class = type(
+                f'{name.title()}{node.__name__}',
+                (Mutation,),
+                {
+                    'Arguments': type(
+                        'Arguments', (), args
+                    ),
+                    'Output': node,
+                    'mutate': func(node, graph_name)
+                })
+            self._mutations[snake_case(mutation_class.__name__)] = mutation_class
 
     def register_subscription(self, subscription):
         self._subscriptions[snake_case(subscription.__name__)] = subscription
@@ -203,9 +216,17 @@ class GQLSchema:
         for query in queries:
             self.register_query(query)
 
-    def register_mutations(self, *mutations):
-        for mutation in mutations:
-            self.register_mutation(mutation)
+    def register_mutations(self, graph):
+        nodes = [*graph.nodes, *graph.edges]
+        while True:
+            if len(nodes) < 1:
+                break
+            node = nodes.pop(0)
+            if isinstance(node, list):
+                nodes.extend(node)
+            else:
+                print('registering mutations for', node)
+                self.register_mutation(node, graph.name)
 
     def register_subscriptions(self, *subscriptions):
         for subscription in subscriptions:

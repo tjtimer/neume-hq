@@ -102,7 +102,7 @@ class ID(Scalar):
             return None
 
 
-class Email(Scalar):
+class Email(String):
     """
     The `String` scalar type represents textual data, represented as UTF-8
     character sequences. The String type is most often used by GraphQL to
@@ -116,12 +116,6 @@ class Email(Scalar):
 
     serialize = coerce_string
     parse_value = coerce_string
-
-    @staticmethod
-    def parse_literal(ast):
-        print('Email parsing literal: ', ast)
-        if isinstance(ast, ast.StringValue):
-            return ast.value
 
 
 class Password(Scalar):

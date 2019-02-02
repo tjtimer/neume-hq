@@ -33,13 +33,16 @@ class BaseModel(ObjectType):
             cls._config_.update(**cls.Config.__dict__)
             delattr(cls, 'Config')
 
-        cls._id = ID()
+        cls._id = String()
         cls._key = String()
         cls._rev = String()
         cls._created = DateTime()
         cls._updated = DateTime()
 
         super().__init_subclass__(**kwargs)
+
+    def __init__(self, **kwargs):
+        super().__init__(**{k: v for k, v in kwargs.items() if hasattr(self, k)})
 
     @property
     def id(self):
@@ -56,30 +59,6 @@ class BaseModel(ObjectType):
                 if k in ['_from', '_to'] or
                 not k.startswith('_') and v is not None}
 
-    async def create(self, client):
-        obj = await client[self._collname_].add(
-            {**self._state, '_created': arrow.utcnow().timestamp},
-            params={'returnNew': 'true'}
-        )
-        self.__dict__.update(**obj['new'])
-
-    async def get(self, client):
-        obj = await client[self._collname_].get(self.id)
-        self.__dict__.update(**obj)
-
-    async def update(self, client):
-        no_id = self.id in (None, '')
-        if no_id:
-            raise ClientError(
-                f'Can not update instance of {self.__class__.__name__}. '
-                f'Attribute _id must be given.'
-            )
-        obj = await client[self._collname_].update(
-            self.id,
-            {**self._state, '_updated': arrow.utcnow().timestamp},
-            params={'returnNew': 'true'}
-        )
-        self.__dict__.update(**obj['new'])
 
 class Node(BaseModel):
     def __init_subclass__(cls, **kwargs):

@@ -162,10 +162,8 @@ class GQField(Dynamic):
                         first: Int = None, skip: Int = None,
                         search: String = None):
         self.query.start_vertex, db = inst._id, info.context['db']
-        result = [obj
-                  async for obj in db.query(self.query.statement)
-                  if obj is not None][0]
-        return self._cls(**result)
+        result = await db.fetch_one(self.query.statement)
+        return self._cls(**result[0]) if len(result) else 'none'
 
 
 class GQList(Dynamic):

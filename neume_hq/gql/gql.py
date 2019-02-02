@@ -7,37 +7,58 @@ import asyncio
 import types
 from pprint import pprint
 from typing import Optional
+import ujson as json
 
 import arrow
 from aio_arango.db import ArangoDB, DocumentType
 from graphene import Mutation, ObjectType, Schema, Field, List, Dynamic, Scalar, String
 
 from neume_hq.gql.fields import ID, GQList
+from neume_hq.gql.models import Node
 from neume_hq.utilities import snake_case, ifl
 
 
 def create(node, graph_name):
+    if hasattr(node, 'create'):
+        return node.create
     async def _create(_, info, **kwargs):
         data = {**kwargs, '_created': arrow.utcnow().timestamp}
-        obj = node(**data)
-        obj.__dict__.update(
-            **(await info.context['db'][graph_name].vertex_create(
-            node._collname_, data))
+        if isinstance(node, Node):
+            creation = info.context['db'][graph_name].vertex_create(
+            node._collname_, data)
+        else:
+            creation = info.context['db'][graph_name].edge_create(
+                node._collname_, data)
+        data.update(
+            **(await creation)
         )
-        return obj
+        return node(**data)
 
     return _create
 
 
 def update(node, graph_name):
+    if hasattr(node, 'update'):
+        return node.update
     async def _update(_, info, **kwargs):
-        _id = kwargs.pop('_id', None)
+        q = f'FOR doc IN {node._collname_}'
         data = {**kwargs, '_updated': arrow.utcnow().timestamp}
-        obj = node(_id=_id, **data)
-        obj.__dict__.update(
-            **(await info.context['db'][graph_name].vertex_update(
-            _id, data)))
-        return obj
+        _id = kwargs.pop('_id', None)
+        if _id is None:
+            _from = data.pop('_from', None)
+            _to = data.pop('_to', None)
+            q = (f'{q}'
+                 f'  FILTER doc._from == \"{_from}\"'
+                 f'  AND doc._to == \"{_to}\"')
+        else:
+            q = F'{q} FILTER doc._id == \"{_id}\"'
+        q = (f'{q}'
+             f'  LIMIT 1'
+             f'  UPDATE doc WITH {json.dumps(data)} IN {node._collname_}'
+             f'  RETURN NEW')
+        print(q)
+        data.update(**(await info.context['db'].fetch_one(q))[0])
+        return node(**data)
 
     return _update
 
@@ -177,7 +198,7 @@ class GQLSchema:
                 if isinstance(v, Scalar)
                 and (k in allowed_args or not k.startswith('_'))}
         for name, func in mutators.items():
-            if name == 'update':
+            if isinstance(node(), Node) and name == 'update':
                 args['_id'] = String(required=True)
             mutation_class = type(
                 f'{name.title()}{node.__name__}',

@@ -3,10 +3,11 @@ app.py
 author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
+import arrow
 from graphene import String
 
 from neume_hq.gql.aql import GraphQuery
-from neume_hq.gql.fields import Email, Password, Date, GQList
+from neume_hq.gql.fields import Email, Password, Date, GQList, GQField
 from neume_hq.gql.models import Node, Index
 
 
@@ -14,6 +15,13 @@ class Person(Node):
     name = String()
     email = Email()
     birthday = Date()
+    works_at = GQField(
+        'Department',
+        query=GraphQuery(
+            'personGraph',
+            direction='OUTBOUND'
+        ).f('v._id').like('departments%')
+    )
 
     class Config:
         indexes = (Index('email'),)

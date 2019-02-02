@@ -30,7 +30,20 @@ class Group(Node):
 class Department(Node):
     title = String()
     description = String()
-    infos = GQList('Info', query=GraphQuery('personGraph', direction='INBOUND', depth=1))
+    infos = GQList(
+        'Info',
+        query=GraphQuery(
+            'personGraph',
+            direction='INBOUND'
+        ).f('v._id').like(f'infos%')
+    )
+    employees = GQList(
+        'Person',
+        query=GraphQuery(
+            'personGraph',
+            direction='INBOUND'
+        ).f('v._id').like(f'people%')
+    )
 
     class Config:
         indexes = (Index('title'),)

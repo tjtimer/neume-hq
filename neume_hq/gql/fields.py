@@ -141,11 +141,14 @@ class GQField(Dynamic):
     def __init__(self, class_name: str, query=None, resolver=None, include=None):
         self.class_name = class_name
         self._cls = None
-        self.query = query
+        self._query = query
+        if query is not None:
+            self.query.f('v._id').like(f'{ifl.plural(snake_case(class_name))}%')
         if resolver is None:
             resolver = self.__resolve
         self.__resolver = resolver
         self._include = include
+
         def get_dynamic():
             from .gql import registry
             if self._include is None:

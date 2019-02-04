@@ -21,7 +21,7 @@ class Person(Node):
             'personGraph',
             direction='OUTBOUND',
             ret = 'MERGE(v, { "status": e.status })'
-        ).f('v._id').like('departments%'),
+        ),
         include=('employer', {'status': String()})
     )
 
@@ -45,14 +45,14 @@ class Department(Node):
         query=GraphQuery(
             'personGraph',
             direction='INBOUND'
-        ).f('v._id').like(f'infos%')
+        )
     )
     employees = GQList(
         'Person',
         query=GraphQuery(
             'personGraph',
             direction='INBOUND'
-        ).f('v._id').like(f'people%')
+        )
     )
 
     class Config:

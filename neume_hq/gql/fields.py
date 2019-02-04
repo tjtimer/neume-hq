@@ -9,6 +9,8 @@ import arrow
 from graphene import Dynamic, Field, Int, List, ObjectType, Scalar, String
 from graphql.execution.tests.test_lists import ast
 
+from neume_hq.utilities import ifl, snake_case
+
 
 class Date(Scalar):
 
@@ -143,7 +145,7 @@ class GQField(Dynamic):
         self._cls = None
         self._query = query
         if query is not None:
-            self.query.f('v._id').like(f'{ifl.plural(snake_case(class_name))}%')
+            self._query.f('v._id').like(f'{ifl.plural(snake_case(class_name))}%')
         if resolver is None:
             resolver = self.__resolve
         self.__resolver = resolver
@@ -169,8 +171,8 @@ class GQField(Dynamic):
                         first: Int = None, skip: Int = None,
                         search: String = None):
         db = info.context['db']
-        self.query.start_vertex = inst._id
-        result = await db.fetch_one(self.query.statement)
+        self._query.start_vertex = inst._id
+        result = await db.fetch_one(self._query.statement)
         return self._cls(**result[0]) if len(result) else None
 
 
@@ -179,7 +181,7 @@ class GQList(Dynamic):
     def __init__(self, class_name: str, query=None, resolver=None):
         self.class_name = class_name
         self._cls = None
-        self.query = query
+        self._query = query
         if resolver is None:
             resolver = self.__resolve
         self.__resolver = resolver
@@ -195,8 +197,8 @@ class GQList(Dynamic):
                         inst, info,
                         first: Int = None, skip: Int = None,
                         search: String = None):
-        self.query.start_vertex, db = inst._id, info.context['db']
+        self._query.start_vertex, db = inst._id, info.context['db']
         return [self._cls(**obj)
-                async for obj in db.query(self.query.statement)
+                async for obj in db.query(self._query.statement)
                 if obj is not None]
 

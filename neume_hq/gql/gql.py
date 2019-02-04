@@ -22,7 +22,7 @@ def create(node, graph_name):
         return node.create
     async def _create(_, info, **kwargs):
         data = {**kwargs, '_created': arrow.utcnow().timestamp}
-        if isinstance(node, Node):
+        if isinstance(node(), Node):
             creation = info.context['db'][graph_name].vertex_create(
             node._collname_, data)
         else:

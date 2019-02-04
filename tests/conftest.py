@@ -8,6 +8,7 @@ import string
 from urllib.parse import urlencode
 
 import arrow
+from aio_arango.db import ArangoDB
 from hypothesis import strategies as st
 import ujson as json
 
@@ -49,19 +50,20 @@ def dumps():
     return json.dumps
 
 
-GoalData = st.fixed_dictionaries({
-    'title': st.text(),
-    'goal_type': st.sampled_from([
-        "hustler", "biker", "gainer", "fatloser", "inboxer",
-        "drinker", "custom"]),
-    'goaldate': st.one_of(st.none(), st.floats()),
-    'goalval': st.one_of(st.none(), st.floats()),
-    'rate': st.one_of(st.none(), st.floats()),
-    'initval': st.floats(),
-    'panic': st.floats(),
-    'secret': st.booleans(),
-    'datapublic': st.booleans(),
-})
+# Example Data Object
+# GoalData = st.fixed_dictionaries({
+#     'title': st.text(),
+#     'goal_type': st.sampled_from([
+#         "hustler", "biker", "gainer", "fatloser", "inboxer",
+#         "drinker", "custom"]),
+#     'goaldate': st.one_of(st.none(), st.floats()),
+#     'goalval': st.one_of(st.none(), st.floats()),
+#     'rate': st.one_of(st.none(), st.floats()),
+#     'initval': st.floats(),
+#     'panic': st.floats(),
+#     'secret': st.booleans(),
+#     'datapublic': st.booleans(),
+# })
 
 PersonData = st.fixed_dictionaries({
     'name': st.text(alphabet=[*string.ascii_letters], min_size=3, max_size=25),
@@ -72,3 +74,11 @@ PersonData = st.fixed_dictionaries({
 @pytest.fixture
 def user_data():
     return (PersonData.example() for _ in range(10))
+
+@pytest.fixture
+async def people_ids(loop):
+    async def _get_ids():
+        async with ArangoDB('user', 'user-pw', 'public') as client:
+            async for _id in client.query('FOR v in people RETURN v._id'):
+                yield _id
+    return _get_ids

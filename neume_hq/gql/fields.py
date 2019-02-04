@@ -137,6 +137,20 @@ class Password(Scalar):
         if isinstance(ast, ast.StringValue):
             return ast.value
 
+def get_or_create_type(field, include=None):
+    from .gql import registry
+    if include is None:
+        cls = registry[field.class_name]
+    elif include[0] in registry.keys():
+        cls = registry[include[0]]
+    else:
+        cls = type(
+            include[0],
+            (registry[field.class_name], ObjectType),
+            {**include[1]}
+        )
+        registry[include[0]] = cls
+    return cls
 
 class GQField(Dynamic):
 
@@ -152,15 +166,7 @@ class GQField(Dynamic):
         self._include = include
 
         def get_dynamic():
-            from .gql import registry
-            if self._include is None:
-                self._cls = registry[self.class_name]
-            else:
-                self._cls = type(
-                    include[0],
-                    (registry[self.class_name], ObjectType),
-                    {**include[1]}
-                )
+            self._cls = get_or_create_type(self, include)
             return Field(self._cls,
                         first=Int(), skip=Int(), search=String(),
                         resolver=self.__resolver)
@@ -178,16 +184,17 @@ class GQField(Dynamic):
 
 class GQList(Dynamic):
 
-    def __init__(self, class_name: str, query=None, resolver=None):
+    def __init__(self, class_name: str, query=None, resolver=None, include=None):
         self.class_name = class_name
         self._cls = None
         self._query = query
         if resolver is None:
             resolver = self.__resolve
         self.__resolver = resolver
+        self._include = include
+
         def get_dynamic():
-            from .gql import registry
-            self._cls = registry[self.class_name]
+            self._cls = get_or_create_type(self, include)
             return List(self._cls,
                         first=Int(), skip=Int(), search=String(),
                         resolver=self.__resolver)

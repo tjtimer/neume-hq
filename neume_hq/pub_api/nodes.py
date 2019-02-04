@@ -24,6 +24,14 @@ class Person(Node):
         ),
         include=('employer', {'status': String()})
     )
+    friends = GQList(
+        'Person',
+        query=GraphQuery(
+            'personGraph',
+            ret='MERGE(v, { "status": e.status, "since": e._created })'
+        ).f('e._id').like('knows%'),
+        include=('friends', {'status': String(), 'since': String()})
+    )
 
     class Config:
         indexes = (Index('email'),)

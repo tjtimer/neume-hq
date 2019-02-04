@@ -122,7 +122,7 @@ class GQLSchema:
         ))
         await asyncio.gather(*(
             db.create_collection(name=name, doc_type=DocumentType.EDGE)
-            for name, edge in self._edges.items()
+            for name in self._edges.keys()
         ))
         await asyncio.gather(*(
             asyncio.gather(*(
@@ -183,8 +183,7 @@ class GQLSchema:
         registry[node.__name__] = self._nodes[node._collname_] = node
 
     def register_edge(self, edge):
-        if edge._collname_ not in self._edges.keys():
-            self._edges[edge._collname_] = edge
+        self._edges[edge._collname_] = edge
 
     def register_query(self, query):
         self._queries[snake_case(query.__name__)] = query

@@ -24,6 +24,14 @@ class WorksAt(Edge):
         _to = (Department,)
         indexes = (Index('_from', '_to'), Index('status', unique=False))
 
+class Knows(Edge):
+    status = String()
+
+    class Config:
+        _any = (Person,)
+        indexes = (Index('_from', '_to'), Index('status', unique=False))
+
+
 class Sent(Edge):
     class Config:
         _from = (Person, Group, Department)

@@ -67,7 +67,7 @@ def dumps():
 
 PersonData = st.fixed_dictionaries({
     'name': st.text(alphabet=[*string.ascii_letters], min_size=3, max_size=25),
-    'email': st.emails(),
+    'email': st.emails().filter(lambda v: len(v) < 25),
     'birthday': st.one_of(st.none(), st.dates().map(lambda x: arrow.get(x).for_json()))
 })
 

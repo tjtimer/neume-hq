@@ -4,13 +4,14 @@ author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
 import asyncio
+import types
 import ujson as json
 from pprint import pprint
 from typing import Optional
 
 import arrow
 from aio_arango.db import ArangoDB, DocumentType
-from graphene import Field, List, Mutation, ObjectType, Scalar, Schema, String
+from graphene import Field, List, Mutation, ObjectType, Scalar, Schema, String, InputObjectType
 
 from neume_hq.gql.fields import ID
 from neume_hq.gql.models import Node
@@ -20,20 +21,26 @@ from neume_hq.utilities import snake_case
 def create(node, graph_name):
     if hasattr(node, 'create'):
         return node.create
-    async def _create(_, info, **kwargs):
-        data = {**kwargs, '_created': arrow.utcnow().timestamp}
-        if isinstance(node(), Node):
-            creation = info.context['db'][graph_name].vertex_create(
-            node._collname_, data)
-        else:
-            creation = info.context['db'][graph_name].edge_create(
-                node._collname_, data)
-        data.update(
-            **(await creation)
-        )
-        return node(**data)
+    async def _create_node(_, info, **kwargs):
 
-    return _create
+        data = {k: v for k, v in kwargs[snake_case(node.__name__)].items()
+                if k.lower() not in ['_id', 'id']}
+        data['_created'] = arrow.utcnow().timestamp
+        new_data = await info.context['db'][graph_name].vertex_create(
+            node._collname_, data)
+        return node(**data, **new_data)
+
+    async def _create_edge(_, info, **kwargs):
+        data = {k: v for k, v in kwargs[snake_case(node.__name__)].items()
+                if k.lower() not in ['_id', 'id']}
+        data['_created'] = arrow.utcnow().timestamp
+        new_data = await info.context['db'][graph_name].edge_create(
+            node._collname_, data)
+        return node(**data, **new_data)
+
+    if isinstance(node(), Node):
+        return _create_node
+    return _create_edge
 
 
 def update(node, graph_name):
@@ -41,8 +48,9 @@ def update(node, graph_name):
         return node.update
     async def _update(_, info, **kwargs):
         q = f'FOR doc IN {node._collname_}'
-        data = {**kwargs, '_updated': arrow.utcnow().timestamp}
-        _id = kwargs.pop('_id', None)
+        data = {**kwargs[snake_case(node.__name__)], '_updated': arrow.utcnow().timestamp}
+        pprint(data)
+        _id = data.pop('_id', data.pop('id', None))
         if _id is None:
             _from = data.pop('_from', None)
             _to = data.pop('_to', None)
@@ -50,13 +58,13 @@ def update(node, graph_name):
                  f'  FILTER doc._from == \"{_from}\"'
                  f'  AND doc._to == \"{_to}\"')
         else:
-            q = F'{q} FILTER doc._id == \"{_id}\"'
+            q = F'{q} FILTER doc._key == \"{_id}\"'
         q = (f'{q}'
              f'  LIMIT 1'
              f'  UPDATE doc WITH {json.dumps(data)} IN {node._collname_}'
              f'  RETURN NEW')
-        data.update(**(await info.context['db'].fetch_one(q))[0])
-        return node(**data)
+        new_data = await info.context['db'].fetch_one(q)
+        return node(**list(new_data)[0])
 
     return _update
 
@@ -66,30 +74,36 @@ mutators = {
 }
 
 def find_(cls):
-    async def inner(_, info, **kwargs):
-        obj = cls(**kwargs)
-        await obj.get(info.context['db'])
-        return obj
+    async def inner(_, info, id=None, **kwargs):
+        q = (f'FOR doc IN {cls._collname_} '
+             f'  FILTER doc._id == {id} '
+             f'  RETURN doc')
+        return cls(**(await info.context['db'].fetch_one(q))[0])
 
     return inner
 
 
 def all_(cls):
-    async def inner(_, info, first=None, skip=None):
-        _q = f'FOR x in {cls._collname_}'
+    async def inner(_, info, id=None, first=None, skip=None):
+        _q = f'FOR doc in {cls._collname_}'
+        if 'asc' in cls._config_.keys():
+            _q = f'{_q} SORT doc.{cls._config_["asc"]} ASC'
+        if 'desc' in cls._config_.keys():
+            _q = f'{_q} SORT doc.{cls._config_["desc"]} DESC'
         if first:
             limit = f'LIMIT {first}'
             if skip:
                 limit = f'LIMIT {skip}, {first}'
             _q = f'{_q} {limit}'
-        _q = f'{_q} RETURN x'
-        result = [cls(**obj) async for obj in info.context['db'].query(_q)]
-        return result
+        _q = f'{_q} RETURN doc'
+        result = [obj async for obj in info.context['db'].query(_q)]
+        pprint(result)
+        return [cls(**d) for d in result]
 
     return inner
 
 registry = {}
-
+input_reg = {}
 class GQLSchema:
     def __init__(self,
                  graphs: Optional[tuple] = None,
@@ -145,19 +159,19 @@ class GQLSchema:
                 (ObjectType,),
                 {
                     snake_case(node.__name__): Field(
-                        node, _id=ID(), resolver=find_(node)
+                        node, id=ID(), resolver=find_(node)
                     ),
-                    node._collname_: List(node, resolver=all_(node))
+                    node._collname_: List(node, id=String(), resolver=all_(node))
                 }
             ) for node in  self._nodes.values()
         ]
         query_master = type(
-            'QueryMaster',
+            'Query',
             (*queries, ObjectType),
             {}
         )
         mutation_master = type(
-            'MutationMaster',
+            'Mutation',
             (ObjectType,),
             {k: v.Field() for k, v in self._mutations.items()}
         )
@@ -189,20 +203,29 @@ class GQLSchema:
         self._queries[snake_case(query.__name__)] = query
 
     def register_mutation(self, node, graph_name):
-        allowed_args = ['_from', '_to']
-        args = {k: v
-                for k, v in node.__dict__.items()
-                if isinstance(v, Scalar)
-                and (k in allowed_args or not k.startswith('_'))}
         for name, func in mutators.items():
-            if isinstance(node(), Node) and name == 'update':
-                args['_id'] = String(required=True)
+            allowed_args = ['_from', '_to']
+            args = {k: v
+                    for k, v in node.__dict__.items()
+                    if isinstance(v, Scalar)
+                    and (k in allowed_args or not k.startswith('_'))}
+            inp_name = f'{node.__name__}Input'
+            if inp_name not in input_reg.keys():
+                input_reg[inp_name] = type(
+                    inp_name,
+                    (InputObjectType,),
+                    {**args}
+                )
+            inp_type = input_reg[inp_name]
+            arg_cfg = {f'{snake_case(node.__name__)}': inp_type()}
+            if name != 'create':
+                arg_cfg['id'] = String()
             mutation_class = type(
                 f'{name.title()}{node.__name__}',
                 (Mutation,),
                 {
                     'Arguments': type(
-                        'Arguments', (), args
+                        'Arguments', (), {**arg_cfg}
                     ),
                     'Output': node,
                     'mutate': func(node, graph_name)

@@ -38,21 +38,17 @@ async def test_create_person(test_cli, url_builder, dumps, user_data):
         # else:
         query = ('mutation '
                  'personCreation('
-                 '  $name: String, '
-                 '  $email: Email, '
-                 '  $birthday: Date'
+                 '  $person: PersonInput, '
                  ') {'
                  '  createPerson('
-                 '    name: $name, '
-                 '    email: $email, '
-                 '    birthday: $birthday'
+                 '    person: $person, '
                  '  )'
                  ' { Id, name, email, Created }'
                  '}')
         resp = await test_cli.post(
             url_builder(
                 query=query,
-                variables=dumps(data)
+                variables=dumps({'person': data})
             )
         )
         # assert resp.status == 200
@@ -64,23 +60,23 @@ async def test_create_friends(people_ids, test_cli, url_builder, dumps):
     inp_data = {}
     ids = [_id async for _id in people_ids()]
     query = ('mutation '
-             'createFriendship($from: String, $to: String) {'
-             '  createKnows(From: $from, To: $to, status: "friend")'
+             'createFriendship($knows: KnowsInput) {'
+             '  createKnows(knows: $knows)'
              '  {Id}'
              '}')
     while True:
         if len(ids) <= 2:
             break
-        inp_data['from'] = ids.pop(0)
-        count = min(random.randint(0, len(ids)), 10)
+        inp_data['From'] = ids.pop(0)
+        count = min(random.randint(0, len(ids)-2), 10)
         possible_ids = [*ids]
         max_idx = len(possible_ids) - 1
         for i in range(count):
-            inp_data['to'] = possible_ids.pop(random.randint(0, max_idx-i))
+            inp_data['To'] = possible_ids.pop(random.randint(0, max_idx-i))
             resp = await test_cli.post(
                 url_builder(
                     query=query,
-                    variables=dumps(inp_data)
+                    variables=dumps({'knows': inp_data})
                 )
             )
             # assert resp.status == 200

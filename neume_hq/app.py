@@ -5,6 +5,10 @@ created: 29.01.2019
 """
 import asyncio
 import sys
+
+import jinja2
+import jinja2_sanic
+
 sys.path.append(__package__)
 
 from aio_arango.client import ArangoAdmin
@@ -13,7 +17,7 @@ from graphql.execution.executors.asyncio import AsyncioExecutor
 from sanic import Sanic
 from sanic_graphql.graphqlview import GraphQLView
 
-from neume_hq.pub_api.schema import schema
+from neume_hq.api.schema import schema
 from neume_hq.utilities import Config
 
 grants = {'admin': 'rw', 'reader': 'ro'}
@@ -22,6 +26,23 @@ def get_app():
     app = Sanic('NEUME-HQ')
     Config(app, '../conf')
     app.on_close = []
+
+    app.static('static/', '/var/www/neume-hq/public/static/')
+    app.static('/*.js', '/var/www/neume-hq/public/assets/*.js', content_type='text/*')
+    app.static(
+        '/service-worker.js',
+        '/var/www/neume-hq/public/assets/service-worker.js',
+        content_type='text/javascript')
+
+    loader = jinja2.FileSystemLoader(searchpath=['/var/www/neume-hq/public'])
+    jinja2_sanic.setup(app, loader=loader)
+    app.render = jinja2_sanic.render_template
+
+
+    @app.get('/')
+    async def index(request):
+        ctx = {}
+        return app.render('index.html', request, ctx)
 
     @app.listener('before_server_start')
     async def setup(app, loop):
@@ -52,10 +73,11 @@ def get_app():
 
         db = ArangoDB('user', 'user-pw', 'public')
         await db.login()
+        app_schema = await schema.setup(db)
         app.add_route(
             GraphQLView.as_view(
-                schema=await schema.setup(db),
-                context={'db': db, 'schema': schema},
+                schema=app_schema,
+                context={'db': db, 'schema': app_schema},
                 executor=AsyncioExecutor(loop=loop),
                 graphiql=True
             ), 'graphql'

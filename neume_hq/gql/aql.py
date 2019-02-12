@@ -3,6 +3,7 @@ aql
 author: Tim "tjtimer" Jedro
 created: 30.01.19
 """
+from neume_hq.gql.models import node_registry
 
 
 class Query:
@@ -102,9 +103,10 @@ class GraphQuery(Query):
 
     @property
     def statement(self):
-        return (f'FOR v, e, p IN '
+        return (f'LET startVertexId = \"{self.start_vertex.split("/")[-1]}\" '
+                f'FOR v, e, p IN '
                 f'{self._depth} {self._direction} '
-                f'\"{self.start_vertex}\" '
+                f' \"{self.start_vertex}\" '
                 f'GRAPH \"{self._graph_name}\" '
                 f'{" ".join(self._expressions)} RETURN {self._ret}')
 
@@ -136,10 +138,10 @@ class EdgeConfig:
 
 class Graph:
 
-    def __init__(self, name, edges):
+    def __init__(self, name, edges, nodes = None):
         self.name = name
         self._edges = []
-        self._nodes = []
+        self._nodes = [] if nodes is None else nodes
         self._edge_definitions = []
         for e in edges:
             self._update(e)
@@ -151,11 +153,14 @@ class Graph:
     def _update(self, e):
         edge_def = EdgeConfig(
             e,
-            **{k: v for k, v in e._config_.items()
+            **{k: [node_registry[nname] for nname in v]
+               for k, v in e._config_.items()
                if k in ['_any', '_from', '_to']}
         )
         self._edge_definitions = [*self._edge_definitions, edge_def.to_dict()]
-        self._nodes.extend([edge_def._any, edge_def._from, edge_def._to])
+        self._nodes = list(
+            set([*self._nodes, *edge_def._any, *edge_def._from, *edge_def._to])
+        )
         self._edges.append(e)
 
     @property

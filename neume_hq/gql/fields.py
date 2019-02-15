@@ -3,10 +3,13 @@ app.py
 author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
+from pprint import pprint
+from typing import Optional
+import ujson as json
 from uuid import UUID
 
 import arrow
-from graphene import Dynamic, Field, Int, List, ObjectType, Scalar, String
+from graphene import Dynamic, Field, List, ObjectType, Scalar, String
 from graphql.execution.tests.test_lists import ast
 
 from neume_hq.utilities import ifl, snake_case
@@ -142,35 +145,35 @@ class Password(Scalar):
 
 def get_or_create_type(field, extra=None):
     from .gql import registry
-    if extra is None:
-        return registry[field.class_name]
-    try:
-        field_name = ifl.singular_noun(field.field_name).title()
-    except AttributeError:
-        field_name = field.field_name.title()
-    name = f'{field.parent_name}{field_name}'
-    if name in registry.keys():
-        return registry[name]
-    registry[name] = type(
-        name,
-        (registry[field.class_name], ObjectType),
-        {**extra}
-    )
+    if extra is None and isinstance(field.root_types, str):
+        return registry[field.root_types]
+    field_name = ifl.singular_noun(field.field_name)
+    if field_name is False:
+        field_name = field.field_name
+    name = f'{field.parent_name}{field_name.title()}'
+    if registry.get(name, None) is None:
+        bases = []
+        if isinstance(field.root_types, str):
+            bases.append(registry[field.root_types])
+        elif isinstance(field.root_types, list):
+            bases.extend([registry[rt] for rt in field.root_types])
+        registry[name] = type(
+            name,
+            (*bases, ObjectType),
+            {**extra} or {}
+        )
     return registry[name]
 
 class GQField(Dynamic):
 
-    def __init__(self, class_name: str, query=None, resolver=None, extra=None):
+    def __init__(self, root_types: [list, str], query, extra: dict=None):
         self._cls = None
+        if isinstance(root_types, str):
+            query.f('v._id').like(f'{ifl.plural(snake_case(root_types))}/%')
         self._query = query
-        if query is not None:
-            self._query.f('v._id').like(f'{ifl.plural(snake_case(class_name))}%')
-        if resolver is None:
-            resolver = self.__resolve
-        self.__resolver = resolver
         self._extra = extra
 
-        self.class_name = class_name
+        self.root_types = root_types
         self.parent_name = None
         self.field_name = None
 
@@ -179,40 +182,37 @@ class GQField(Dynamic):
             return Field(self._cls, resolver=self.__resolver)
         super().__init__(get_dynamic)
 
-    async def __resolve(self, inst, info):
+    async def __resolver(self, inst, info):
         db = info.context['db']
         self._query.start_vertex = inst._id
+        pprint(self._query.statement)
         result = await db.fetch_one(self._query.statement)
         return self._cls(**result[0]) if len(result) else None
 
 
 class GQList(Dynamic):
 
-    def __init__(self, class_name: str, query=None, resolver=None, extra=None):
+    def __init__(self, root_types: [str, list], query, extra=None):
         self._cls = None
         self._query = query
-        if resolver is None:
-            resolver = self.__resolve
-        self.__resolver = resolver
         self._extra = extra
 
-        self.class_name = class_name
+        self.root_types = root_types
         self.parent_name = None
         self.field_name = None
 
         def get_dynamic():
-            print('GQList get_dynamic: ', self.class_name)
+            print('GQList get_dynamic: ', self.root_types)
             self._cls = get_or_create_type(self, extra)
             return List(self._cls,
-                        first=Int(), skip=Int(), search=String(),
                         resolver=self.__resolver)
         super().__init__(get_dynamic)
 
-    async def __resolve(self,
+    async def __resolver(self,
                         inst, info,
-                        first: Int = None, skip: Int = None,
-                        search: String = None):
+                        filter: dict=None):
         self._query.start_vertex, db = inst._id, info.context['db']
+        pprint(self._query.statement)
         return [self._cls(**obj)
                 async for obj in db.query(self._query.statement)
                 if obj is not None]

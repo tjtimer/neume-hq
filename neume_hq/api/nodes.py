@@ -3,11 +3,12 @@ app.py
 author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
+from pprint import pprint
 
-from graphene import String
+from graphene import String, Boolean, Enum, Field
 
 from neume_hq.gql.aql import GraphQuery
-from neume_hq.gql.fields import Date, Email, GQField, GQList
+from neume_hq.gql.fields import Date, Email, GQField, GQList, DateTime, Time
 from neume_hq.gql.models import Index, Node
 
 
@@ -17,16 +18,16 @@ class Person(Node):
     birthday = Date()
     employer = GQField(
         'Department',
-        query=GraphQuery(
+        GraphQuery(
             'personGraph',
             direction='OUTBOUND',
-            ret = 'MERGE(v, { "status": e.status })'
+            ret='MERGE(v, { "status": e.status })'
         ),
         extra={'status': String()}
     )
     friends = GQList(
         'Person',
-        query=GraphQuery(
+        GraphQuery(
             'personGraph',
             ret='MERGE(v, '
                 '  {"friendshipId": e._id, '
@@ -41,6 +42,13 @@ class Person(Node):
             'since': String(),
             'pId': String()
         }
+    )
+    messages = GQList(
+        'Message',
+        GraphQuery(
+            'personGraph',
+            direction='INBOUND'
+        ).f('e._id').like('received/%')
     )
 
     class Config:
@@ -86,7 +94,13 @@ class Department(Node):
 class Info(Node):
     title = String()
     body = String()
-    infos = GQList('Info', query=GraphQuery('personGraph', direction='INBOUND'))
+    infos = GQList(
+        'Info',
+        GraphQuery(
+            'personGraph',
+            direction='INBOUND'
+        ).f('e._id').like('belongs_to/%')
+    )
 
     class Config:
         indexes = (Index('title'),)
@@ -95,6 +109,13 @@ class Info(Node):
 class Message(Node):
     title = String()
     body = String()
+    sender = GQField(
+        'Person',
+        GraphQuery(
+            'personGraph',
+            direction='INBOUND'
+        ).f('e._id').like('created/%')
+    )
     attachments = GQList(
         'Media',
         query=GraphQuery(
@@ -102,9 +123,15 @@ class Message(Node):
             direction='INBOUND'
         )
     )
+
     class Config:
         indexes = (Index('title'), Index('body', type='fulltext'))
 
+    @classmethod
+    async def create(cls, _, info, **data):
+        print('create message')
+        pprint(data)
+        return cls(**data)
 
 class Media(Node):
     name = String()
@@ -130,19 +157,45 @@ class Venue(Node):
     class Config:
         indexes = (Index('name', unique=False), Index('city', unique=False))
 
-class Concert(Node):
-    date = Date()
-    venue = GQField(
-        'Venue',
-        query=GraphQuery(
-            'personGraph',
-            direction='OUTBOUND'
-        )
-    )
-    venue_id = String()
+class Event(Node):
+    title = String()
+    start_date = Date()
+    start_time = Time()
+    end_date = Date()
+    end_time = Time()
+    all_day = Boolean()
 
     class Config:
-        asc = 'date'
+        indexes = (Index('title', unique=False), Index('start_date', unique=False))
 
-    async def resolve_venue_id(self, *_):
-        return None if self.venue is None else self.venue._key
+class ConcertStatus(Enum):
+    NULL = 0
+    FIX = 1
+    CANCELLED = 2
+    NEGOTIATION = 3
+
+
+class Concert(Node):
+    date = Date()
+    status = Field(ConcertStatus, default_value=ConcertStatus.NULL)
+    venue = GQField(
+        'Venue',
+        GraphQuery(
+            'personGraph',
+            direction='INBOUND'
+        )
+    )
+
+    class Config:
+        indexes = (Index('date', unique=False),)
+
+
+class ToDo(Node):
+    title = String()
+    creator = GQField(
+        'Person',
+        GraphQuery(
+            'personGraph',
+            direction='INBOUND',
+        ).f('e._id').like('created/%')
+    )

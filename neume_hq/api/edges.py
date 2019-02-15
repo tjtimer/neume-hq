@@ -9,9 +9,15 @@ from neume_hq.gql.models import Edge, Index
 
 class BelongsTo(Edge):
     class Config:
-        _any = ('Group', 'Department', 'Info', 'Message', 'Media')
+        _any = ('Group', 'Department', 'Info', 'Message', 'Media', 'ToDo')
         _to = ('Person',)
         indexes = (Index('_from', '_to'),)
+
+
+class Created(Edge):
+    class Config:
+        _from = ('Person', 'Group')
+        _to = ('Group', 'Media', 'Message', 'Info', 'ToDo')
 
 
 class WorksAt(Edge):
@@ -40,19 +46,13 @@ class Knows(Edge):
         indexes = (Index('_from', '_to'), Index('status', unique=False))
 
 
-class Sent(Edge):
-    class Config:
-        _from = ('Person', 'Group', 'Department')
-        _to = ('Message', 'Media', 'Info')
-
-
-class Received(Edge):
+class SentTo(Edge):
     class Config:
         _from = ('Message', 'Media', 'Info')
         _to = ('Person', 'Group', 'Department')
 
 
-class HostedBy(Edge):
+class Hosting(Edge):
     class Config:
-        _from = ('Concert',)
-        _to = ('Venue',)
+        _from = ('Person', 'Department', 'Venue')
+        _to = ('Concert', 'Event')

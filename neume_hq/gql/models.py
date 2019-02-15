@@ -3,8 +3,9 @@ app.py
 author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
-
-from graphene import ObjectType, String
+from pprint import pprint
+import ujson as json
+from graphene import ObjectType, String, Scalar
 
 from neume_hq.gql.fields import DateTime, GQList, GQField
 from neume_hq.utilities import ifl, snake_case
@@ -50,12 +51,24 @@ class BaseModel(ObjectType):
     def _state(self) -> dict:
         return {k: v
                 for k, v in self.__dict__.items()
-                if k in ['_from', '_to'] or
-                not k.startswith('_') and v is not None}
+                if v is not None and isinstance(v, Scalar)}
 
     def resolve_id(self, *_):
         return self._key if self._key else str(self._id).split('/')[-1]
 
+    @classmethod
+    async def find(cls, info, id=None):
+        print(f'find {cls.__name__} with id: {id}')
+        pprint(info.context['request'].json)
+        resp = await info.context['db'][cls._collname_].get(id)
+        return cls(**await resp.json())
+
+    @classmethod
+    async def all(cls, _, info, id=None, filter: dict=None):
+        print(f'all {cls._collname_}')
+        pprint(info.context['request'].json)
+        resp = await info.context['db'][cls._collname_].all()
+        return (cls(**obj) for obj in resp)
 
 class Node(BaseModel):
     def __init_subclass__(cls, **kwargs):

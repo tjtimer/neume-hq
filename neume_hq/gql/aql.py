@@ -3,21 +3,30 @@ aql
 author: Tim "tjtimer" Jedro
 created: 30.01.19
 """
-from neume_hq.gql.models import node_registry
+from .models import node_registry
 
 
-class Query:
+class AGQuery:
 
     def __init__(self):
         self._expressions = []
-        self._identifiers = []
+        self._docs = []
+
+    @property
+    def entities(self):
+        return {**self._docs}
 
     @property
     def statement(self):
         return ' '.join(self._expressions)
 
+    def with_(self, collections):
+        self._expressions.insert(0, f'WITH {" ,".join(list(collections))}')
+        return self
+
     def fi(self, identifier, collection):
         self._expressions.append(f'FOR {identifier} IN {collection}')
+        self._docs.append((identifier, collection))
         return self
 
     def f(self, field):
@@ -66,20 +75,23 @@ class Query:
         self._expressions.append(f'LIMIT {abs(int(offset))}, {abs(int(size))}')
         return self
 
-    def asc(self, field):
-        self._expressions.append(f'SORT {field} ASC')
+    def asc(self, fields):
+        self._expressions.append(f'SORT {fields} ASC')
         return self
 
-    def desc(self, field):
-        self._expressions.append(f'SORT {field} DESC')
+    def desc(self, fields):
+        self._expressions.append(f'SORT {fields} DESC')
         return self
 
-    def ret(self, ret_str):
-        self._expressions.append(f'RETURN {ret_str}')
+    def ret(self, ret_str, distinct=None):
+        if distinct is None:
+            self._expressions.append(f'RETURN {ret_str}')
+        else:
+            self._expressions.append(f'RETURN DISTINCT {ret_str}')
         return self
 
 
-class GraphQuery(Query):
+class GraphQuery(AGQuery):
 
     def __init__(self,
                  graph_name: str, *,

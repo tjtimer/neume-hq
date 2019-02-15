@@ -13,7 +13,7 @@ import arrow
 from aio_arango.db import ArangoDB, DocumentType
 from graphene import Field, List, Mutation, ObjectType, Scalar, Schema, String, InputObjectType
 
-from neume_hq.gql.fields import ID
+from neume_hq.gql.fields import ID, GQList, GQField
 from neume_hq.gql.models import Node
 from neume_hq.utilities import snake_case
 
@@ -33,7 +33,7 @@ def create(node, graph_name):
     async def _create_edge(_, info, **kwargs):
         data = {k: v for k, v in kwargs[snake_case(node.__name__)].items()
                 if k.lower() not in ['_id', 'id']}
-        data['_created'] = arrow.utcnow().timestamp
+        data['_created'] = arrow.utcnow()
         new_data = await info.context['db'][graph_name].edge_create(
             node._collname_, data)
         return node(**data, **new_data)
@@ -49,7 +49,6 @@ def update(node, graph_name):
     async def _update(_, info, **kwargs):
         q = f'FOR doc IN {node._collname_}'
         data = {**kwargs[snake_case(node.__name__)], '_updated': arrow.utcnow().timestamp}
-        pprint(data)
         _id = data.pop('_id', data.pop('id', None))
         if _id is None:
             _from = data.pop('_from', None)
@@ -73,35 +72,6 @@ mutators = {
     'update': update
 }
 
-def find_(cls):
-    async def inner(_, info, id=None, **kwargs):
-        q = (f'FOR doc IN {cls._collname_} '
-             f'  FILTER doc._id == {id} '
-             f'  RETURN doc')
-        return cls(**(await info.context['db'].fetch_one(q))[0])
-
-    return inner
-
-
-def all_(cls):
-    async def inner(_, info, id=None, first=None, skip=None):
-        _q = f'FOR doc in {cls._collname_}'
-        if 'asc' in cls._config_.keys():
-            _q = f'{_q} SORT doc.{cls._config_["asc"]} ASC'
-        if 'desc' in cls._config_.keys():
-            _q = f'{_q} SORT doc.{cls._config_["desc"]} DESC'
-        if first:
-            limit = f'LIMIT {first}'
-            if skip:
-                limit = f'LIMIT {skip}, {first}'
-            _q = f'{_q} {limit}'
-        _q = f'{_q} RETURN doc'
-        result = [obj async for obj in info.context['db'].query(_q)]
-        pprint(result)
-        return [cls(**d) for d in result]
-
-    return inner
-
 registry = {}
 input_reg = {}
 class GQLSchema:
@@ -119,6 +89,7 @@ class GQLSchema:
         self._queries = {}
         self._mutations = {}
         self._subscriptions = {}
+        self.execute = None
 
         if isinstance(graphs, (list, tuple)):
             self.register_graphs(*graphs)
@@ -159,11 +130,11 @@ class GQLSchema:
                 (ObjectType,),
                 {
                     snake_case(node.__name__): Field(
-                        node, id=ID(), resolver=find_(node)
+                        node, id=ID(), resolver=node.find
                     ),
-                    node._collname_: List(node, id=String(), resolver=all_(node))
+                    node._collname_: List(node, id=String(), resolver=node.all)
                 }
-            ) for node in  self._nodes.values()
+            ) for node in self._nodes.values()
         ]
         query_master = type(
             'Query',
@@ -185,6 +156,7 @@ class GQLSchema:
             query=query_master,
             mutation=mutation_master
         )
+        self.execute = self._schema.execute
         return self._schema
 
     def register_graph(self, graph):
@@ -203,14 +175,14 @@ class GQLSchema:
         self._queries[snake_case(query.__name__)] = query
 
     def register_mutation(self, node, graph_name):
+        inp_name = f'{node.__name__}Input'
+        allowed_args = ['_from', '_to']
         for name, func in mutators.items():
-            allowed_args = ['_from', '_to']
-            args = {k: v
-                    for k, v in node.__dict__.items()
-                    if isinstance(v, Scalar)
-                    and (k in allowed_args or not k.startswith('_'))}
-            inp_name = f'{node.__name__}Input'
-            if inp_name not in input_reg.keys():
+            if input_reg.get(inp_name, None) is None:
+                args = {k: v
+                        for k, v in node.__dict__.items()
+                        if isinstance(v, Scalar)
+                        and (k in allowed_args or not k.startswith('_'))}
                 input_reg[inp_name] = type(
                     inp_name,
                     (InputObjectType,),

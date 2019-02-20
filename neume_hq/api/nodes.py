@@ -5,7 +5,7 @@ created: 29.01.2019
 """
 from pprint import pprint
 
-from graphene import String, Boolean, Enum, Field
+from graphene import String, Boolean, Enum, Field, List, ID
 
 from neume_hq.gql.aql import GraphQuery
 from neume_hq.gql.fields import Date, Email, GQField, GQList, DateTime, Time
@@ -21,7 +21,7 @@ class Person(Node):
         GraphQuery(
             'personGraph',
             direction='OUTBOUND',
-            ret='MERGE(v, { "status": e.status })'
+            ret='{"node": v, "status":e.status}'
         ),
         extra={'status': String()}
     )
@@ -29,15 +29,15 @@ class Person(Node):
         'Person',
         GraphQuery(
             'personGraph',
-            ret='MERGE(v, '
-                '  {"friendshipId": e._id, '
-                '   "status": e.status, '
-                '   "since": e._created, '
-                '   "pId": startVertexId}'
-                ')'
+            ret=('{"node": v,'
+                 ' "id": e._id, '
+                 ' "status": e.status, '
+                 ' "since": e._created, '
+                 ' "pId": startVertexId'
+                 '}')
         ),
         extra={
-            'friendshipId': String(),
+            'id': ID(),
             'status': String(),
             'since': String(),
             'pId': String()

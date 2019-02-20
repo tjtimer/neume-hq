@@ -24,6 +24,7 @@ from sanic_graphql.graphqlview import GraphQLView
 from neume_hq.api.schema import schema
 from neume_hq.utilities import Config
 
+STATIC_DIR = '/var/www/neume-hq/public/static'
 grants = {'admin': 'rw', 'reader': 'ro'}
 
 def gql_middleware(next, root, info, **kwargs):
@@ -34,38 +35,30 @@ def gql_middleware(next, root, info, **kwargs):
 
 def get_app():
     app = Sanic('NEUME-HQ')
+    app.gq_schema = schema
     Config(app, '../conf')
     app.on_close = []
-    app.static('/assets', '/var/www/neume-hq/public/static/assets')
-    app.static('/img', '/var/www/neume-hq/public/static/img')
-    app.static('/js', '/var/www/neume-hq/public/static/js')
+    app.static('/assets', f'{STATIC_DIR}/assets')
+    app.static('/img', f'{STATIC_DIR}/img')
+    app.static('/js', f'{STATIC_DIR}/js')
 
     app.static(
         '/service-worker.js',
-        '/var/www/neume-hq/public/static/assets/service-worker.js')
+        f'{STATIC_DIR}/service-worker.js')
 
     loader = jinja2.FileSystemLoader(searchpath=['/var/www/neume-hq/public'])
     jinja2_sanic.setup(app, loader=loader)
     app.render = jinja2_sanic.render_template
 
-    @app.post('/graphql')
-    async def gql_mw(request):
-        query = request.json.get('query', None)
-        if query is not None:
-            request.app.gq_db.count = 0
-            qu = query
-            pprint(qu)
-            try:
-                _res = request.app.gq_schema._schema.execute(query)
-                pprint(_res)
-                result = _res
-                pprint(result)
-                return response.json(result)
-            except Exception as e:
-                return response.text(e)
+
+    @app.middleware('request')
+    def request_mw(request):
+        print('before')
+        request.app.gq_db.count = 0
+        print(request.app.gq_db.count)
 
     @app.middleware('response')
-    def mw(request, response):
+    def response_mw(request, response):
         print('after')
         print(request.app.gq_db.count)
 
@@ -108,19 +101,17 @@ def get_app():
                       if name not in cfg['users'].values())
                 )
 
-        app.gq_db = db = ArangoDB('user', 'user-pw', 'public')
-        await db.login()
-        app.gq_schema = schema
+        app.gq_db = ArangoDB('user', 'user-pw', 'public')
+        await app.gq_db.login()
         app.add_route(
             GraphQLView.as_view(
-                schema=await schema.setup(db),
-                context={'db': db},
+                schema=await schema.setup(app.gq_db),
+                context={'db': app.gq_db, 'cache': {}},
                 batch=True,
                 executor=app._executor,
-                graphiql=False
-            ), 'graphql2'
+                graphiql=True
+            ), 'graphql'
         )
-        app.on_close.append(db.close)
 
 
     @app.listener('after_server_stop')
@@ -128,6 +119,7 @@ def get_app():
         await asyncio.gather(*(
             func() for func in app.on_close
         ))
+        await app.gq_db.close()
         print('server closed')
 
     return app

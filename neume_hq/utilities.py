@@ -21,6 +21,16 @@ def snake_case(word: str) -> str:
         snake_cased += letter
     return snake_cased
 
+def camel_case(word: str) -> str:
+    words = word.replace('-', '_').split('_')
+    tail = "".join([
+        part.title()
+        for part in words[1:]
+    ])
+    return f'{words[0]}{tail}'
+
+def pascal_case(word: str)->str:
+    return camel_case(word).title()
 
 def flatten(key: str, obj: dict) -> dict:
     to_check = [(key, obj)]

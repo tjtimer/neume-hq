@@ -3,16 +3,12 @@ app.py
 author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
-from pprint import pprint
-from typing import Optional
-import ujson as json
-from uuid import UUID
 
 import arrow
-from graphene import Dynamic, Field, List, ObjectType, Scalar, String
+from graphene import Connection, Dynamic, Scalar, String, relay, Field
 from graphql.execution.tests.test_lists import ast
 
-from neume_hq.utilities import ifl, snake_case
+from neume_hq.utilities import ifl, pascal_case, snake_case
 
 
 class Date(Scalar):
@@ -87,28 +83,6 @@ class DateTime(Scalar):
             return None
 
 
-class ID(Scalar):
-
-    @staticmethod
-    def serialize(value):
-        try:
-            return UUID(value).hex
-        except ValueError:
-            return None
-
-    @classmethod
-    def parse_literal(cls, node):
-        if isinstance(node, ast.StringValue):
-            return cls.parse_value(node.value)
-
-    @staticmethod
-    def parse_value(value):
-        try:
-            return UUID(value)
-        except ValueError:
-            return None
-
-
 class Email(String):
     """
     The `String` scalar type represents textual data, represented as UTF-8
@@ -143,77 +117,83 @@ class Password(Scalar):
         if isinstance(ast, ast.StringValue):
             return ast.value
 
-def get_or_create_type(field, extra=None):
-    from .gql import registry
-    if extra is None and isinstance(field.root_types, str):
-        return registry[field.root_types]
-    field_name = ifl.singular_noun(field.field_name)
-    if field_name is False:
-        field_name = field.field_name
-    name = f'{field.parent_name}{field_name.title()}'
-    if registry.get(name, None) is None:
-        bases = []
-        if isinstance(field.root_types, str):
-            bases.append(registry[field.root_types])
-        elif isinstance(field.root_types, list):
-            bases.extend([registry[rt] for rt in field.root_types])
-        registry[name] = type(
-            name,
-            (*bases, ObjectType),
-            {**extra} or {}
-        )
-    return registry[name]
+
+connection_registry = {}
 
 class GQField(Dynamic):
 
-    def __init__(self, root_types: [list, str], query, extra: dict=None):
-        self._cls = None
-        if isinstance(root_types, str):
-            query.f('v._id').like(f'{ifl.plural(snake_case(root_types))}/%')
-        self._query = query
-        self._extra = extra
+    _is_list = False
 
-        self.root_types = root_types
+    def __init__(self, node_type: str, query, extra: dict=None):
+
+        self._cls = None
+        query.f('v._id').like(f'{ifl.plural(snake_case(node_type))}/%')
+        self._query = query
+        self._extra = {
+            'pId': String()}
+        if isinstance(extra, dict):
+            self._extra.update(**extra)
+
+        self.node_type_name = node_type
+        self.node_type = None
         self.parent_name = None
         self.field_name = None
 
         def get_dynamic():
-            self._cls = get_or_create_type(self, extra)
-            return Field(self._cls, resolver=self.__resolver)
+            cls = self.create_type()
+            if self._is_list is False:
+                return Field(lambda: self.node_type, resolver=self.resolve)
+            return relay.ConnectionField(cls, resolver=self.resolve)
         super().__init__(get_dynamic)
 
-    async def __resolver(self, inst, info):
-        db = info.context['db']
+    def create_type(self):
+        from .gql import registry
+        self._is_list = True
+        self.node_type = registry[self.node_type_name]
+        field_name = ifl.singular_noun(self.field_name)
+        if field_name is False:
+            self._is_list = False
+            field_name = self.field_name
+        name = f'{self.parent_name}{pascal_case(field_name)}'
+        # if self.node_type is None:
+        #     from neume_hq.gql.models import GQNode
+        #     self.node_type = registry[name] = type(
+        #         name,
+        #         (registry[self.node_type_name], ObjectType),
+        #         {
+        #             'Meta': type('Meta', (), {'interfaces': (GQNode,)}),
+        #             'Edge': type('Edge', (), self._extra)}
+        #     )
+        conn_name = f'{name}Connection'
+        self._cls = connection_registry.get(conn_name, None)
+        if  self._cls is None:
+            self._cls = connection_registry[conn_name] = type(
+                conn_name,
+                (Connection,),
+                {'Meta': type('Meta', (), {'node': self.node_type}),
+                 'Edge': type('Edge', (), self._extra)}
+            )
+        return self._cls
+
+    async def resolve(self, inst, info, id=None):
         self._query.start_vertex = inst._id
-        pprint(self._query.statement)
-        result = await db.fetch_one(self._query.statement)
-        return self._cls(**result[0]) if len(result) else None
+        data = {'_id': 'none'}
+        obj = await info.context['db'].fetch_one(self._query.statement)
+        data.update(**obj)
+        return self.node_type(**data)
 
 
-class GQList(Dynamic):
-
-    def __init__(self, root_types: [str, list], query, extra=None):
-        self._cls = None
-        self._query = query
-        self._extra = extra
-
-        self.root_types = root_types
-        self.parent_name = None
-        self.field_name = None
-
-        def get_dynamic():
-            print('GQList get_dynamic: ', self.root_types)
-            self._cls = get_or_create_type(self, extra)
-            return List(self._cls,
-                        resolver=self.__resolver)
-        super().__init__(get_dynamic)
-
-    async def __resolver(self,
-                        inst, info,
-                        filter: dict=None):
+class GQList(GQField):
+    _is_list = True
+    async def resolve(self,
+                      inst, info,
+                      **kwargs):
         self._query.start_vertex, db = inst._id, info.context['db']
-        pprint(self._query.statement)
-        return [self._cls(**obj)
-                async for obj in db.query(self._query.statement)
+        edges = [obj async for obj in db.query(self._query.statement)
                 if obj is not None]
-
+        return self._cls(edges=[
+            self._cls.Edge(
+                **{k: v for k, v in obj.items() if k!= 'node'},
+                node=self.node_type(**obj['node'])
+            ) for obj in edges
+        ])

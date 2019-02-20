@@ -109,8 +109,9 @@ class GraphQuery(AGQuery):
         else:
             depth = abs(int(depth))
         self._depth = depth
-        self._direction = 'ANY' if direction is None else direction.upper()
-        self._ret = 'v' if ret is None else ret
+        direction = direction or 'ANY'
+        self._direction = direction.upper()
+        self._ret = ret or '{"node": v, "pId": startVertexId}'
         self.start_vertex = None
 
     @property
@@ -165,13 +166,13 @@ class Graph:
     def _update(self, e):
         edge_def = EdgeConfig(
             e,
-            **{k: [node_registry[nname] for nname in v]
-               for k, v in e._config_.items()
+            **{k: [node_registry[name] for name in v]
+               for k, v in e._config_.relations.items()
                if k in ['_any', '_from', '_to']}
         )
         self._edge_definitions = [*self._edge_definitions, edge_def.to_dict()]
         self._nodes = list(
-            set([*self._nodes, *edge_def._any, *edge_def._from, *edge_def._to])
+            {*self._nodes, *edge_def._any, *edge_def._from, *edge_def._to}
         )
         self._edges.append(e)
 

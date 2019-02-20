@@ -4,17 +4,15 @@ author: Tim "tjtimer" Jedro
 created: 29.01.2019
 """
 import asyncio
-import types
-import ujson as json
-from pprint import pprint
 from typing import Optional
 
 import arrow
+import ujson as json
 from aio_arango.db import ArangoDB, DocumentType
-from graphene import Field, List, Mutation, ObjectType, Scalar, Schema, String, InputObjectType
+from graphene import (Field, InputObjectType, Mutation, ObjectType, Scalar, Schema, String, relay)
+from sanic_graphql import GraphQLView
 
-from neume_hq.gql.fields import ID, GQList, GQField
-from neume_hq.gql.models import Node
+from neume_hq.gql.models import Node, connection_registry, node_registry, GQNode
 from neume_hq.utilities import snake_case
 
 
@@ -33,7 +31,7 @@ def create(node, graph_name):
     async def _create_edge(_, info, **kwargs):
         data = {k: v for k, v in kwargs[snake_case(node.__name__)].items()
                 if k.lower() not in ['_id', 'id']}
-        data['_created'] = arrow.utcnow()
+        data['_created'] = arrow.utcnow().timestamp
         new_data = await info.context['db'][graph_name].edge_create(
             node._collname_, data)
         return node(**data, **new_data)
@@ -102,44 +100,46 @@ class GQLSchema:
 
     async def setup(self, db: ArangoDB):
         await asyncio.gather(*(
-            db.create_collection(name=node)
-            for node in self._nodes.keys()
+            *(db.create_collection(name=node)
+              for node in self._nodes.keys()),
+            *(db.create_collection(name=name, doc_type=DocumentType.EDGE)
+              for name in self._edges.keys())
         ))
-        await asyncio.gather(*(
-            db.create_collection(name=name, doc_type=DocumentType.EDGE)
-            for name in self._edges.keys()
-        ))
-        await asyncio.gather(*(
-            asyncio.gather(*(
-                db.create_index(
+        await asyncio.gather(
+            *(asyncio.gather(
+                *(db.create_index(
                     col._collname_,
-                    {k: idx.__dict__[k] for k in ['type', 'fields', 'unique', 'sparse']}
+                    {k: idx.__dict__[k]
+                     for k in ['type', 'fields', 'unique', 'sparse']}
+                    )
+                    for idx in col._config_.indexes
                 )
-                for idx in col._config_.get('indexes', [])
-            ))
-            for col in [*self._nodes.values(), *self._edges.values()]
-        ))
-        await asyncio.gather(*(
-            db.create_graph(graph.name, graph.edge_definitions)
-            for graph in self._graphs.values()
-        ))
+            ) for col in (*self._nodes.values(), *self._edges.values())),
+            *(db.create_graph(graph.name, graph.edge_definitions)
+              for graph in self._graphs.values())
+        )
+
         self._db = db
-        queries = [
-            type(
-                f'{node.__name__}Query',
-                (ObjectType,),
-                {
-                    snake_case(node.__name__): Field(
-                        node, id=ID(), resolver=node.find
-                    ),
-                    node._collname_: List(node, id=String(), resolver=node.all)
-                }
-            ) for node in self._nodes.values()
-        ]
+        # queries = [
+        #     type(
+        #         f'{node.__name__}Query',
+        #         (ObjectType,),
+        #         {
+        #             snake_case(node.__name__): Field(
+        #                 node, id=ID(), resolver=node.find
+        #             ),
+        #             node._collname_: relay.ConnectionField(node)
+        #         }
+        #     ) for node in self._nodes.values()
+        # ]
         query_master = type(
             'Query',
-            (*queries, ObjectType),
-            {}
+            (ObjectType,),
+            {'node': GQNode.Field(),
+             **{
+                 name: relay.ConnectionField(connection, resolver=connection._meta.node.all)
+                 for name, connection in connection_registry.items()
+             }}
         )
         mutation_master = type(
             'Mutation',
@@ -154,9 +154,9 @@ class GQLSchema:
         # noinspection PyTypeChecker
         self._schema = Schema(
             query=query_master,
-            mutation=mutation_master
+            mutation=mutation_master,
+            types=[*node_registry.values(), GQNode]
         )
-        self.execute = self._schema.execute
         return self._schema
 
     def register_graph(self, graph):
@@ -230,7 +230,7 @@ class GQLSchema:
             self.register_query(query)
 
     def register_mutations(self, graph):
-        nodes = [*graph.nodes, *graph.edges]
+        nodes = [*{*graph.nodes, *graph.edges}]
         while True:
             if len(nodes) < 1:
                 break
@@ -244,3 +244,6 @@ class GQLSchema:
         for subscription in subscriptions:
             self.register_subscription(subscription)
 
+
+class GQView(GraphQLView):
+    pass

@@ -9,15 +9,25 @@ from pprint import pprint
 async def test_query_people(test_cli, url_builder):
     resp = await test_cli.post(
         url_builder(query=('query {'
-                           '  people { Id, name, email }'
-                           '}')))
+                           '  people {'
+                           '    edges {'
+                           '        node {'
+                           '            Id, name, email, friends {'
+                           '                edges { '
+                           '                    node { '
+                           '                        id, name'
+                           '}}}}}}}'
+                           )
+                    )
+    )
     assert resp.status == 200
     data = await resp.json()
     assert 'data' in data.keys()
     assert 'people' in data['data'].keys()
-    assert isinstance(data['data']['people'], list)
-    for person in data['data']['people']:
-        assert all(map(lambda k: k in person.keys(), ['Id', 'name', 'email']))
+    assert isinstance(data['data']['people']['edges'], list)
+    print('length: ', len(data['data']['people']['edges']))
+    for person in data['data']['people']['edges']:
+        assert all(map(lambda k: k in person['node'].keys(), ['Id', 'name', 'email']))
 
 
 async def test_create_person(test_cli, url_builder, dumps, user_data):
@@ -81,4 +91,5 @@ async def test_create_friends(people_ids, test_cli, url_builder, dumps):
             )
             # assert resp.status == 200
             data = await resp.json()
+            pprint(data)
             assert 'data' in data.keys()
